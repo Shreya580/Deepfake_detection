@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+uploads/
+frames/
+results/
+git rm -r --cached venv
