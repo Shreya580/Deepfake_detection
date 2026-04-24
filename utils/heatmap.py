@@ -1,141 +1,217 @@
 import cv2
 import numpy as np
 from PIL import Image
-import io
+import torch
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.image import show_cam_on_image
+import mediapipe as mp
+
+# ── Load MediaPipe face mesh ONCE ─────────────────────────────────────────────
+# Same reason as model — load once, reuse every call
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(
+    static_image_mode=True,      # Single image, not video stream
+    max_num_faces=1,             # We only care about the main face
+    refine_landmarks=True,       # Get the precise 468-point mesh
+    min_detection_confidence=0.3 # Accept lower confidence for difficult images
+)
+
+# ── MediaPipe landmark indices for facial regions ─────────────────────────────
+# MediaPipe gives 468 landmarks. These index groups correspond to named regions.
+# Source: MediaPipe face mesh topology map
+REGION_LANDMARKS = {
+    "Left eye":   [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
+    "Right eye":  [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398],
+    "Lips":       [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146],
+    "Jaw":        [132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288, 361, 323],
+    "Forehead":   [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377],
+    "Nose":       [1, 2, 5, 4, 195, 197, 6, 168, 8, 9]
+}
+
 
 def generate_face_heatmap(image_path, fake_score, breakdown):
     """
-    Generates a heatmap overlay on the face image showing suspicious regions.
+    Generates a REAL Grad-CAM heatmap showing which pixels the AI
+    used to make its fake/real decision.
     
     HOW IT WORKS:
-    1. Detect face landmarks using DeepFace/OpenCV
-    2. Assign suspicion weights to facial regions based on our score breakdown
-    3. Create a Gaussian heat blob at each region
-    4. Overlay the heatmap on the original image with transparency
+    1. Load the image
+    2. Run it through the model with Grad-CAM hooks active
+    3. Grad-CAM computes gradients → produces a 2D activation map
+    4. Normalize and apply green→red colormap
+    5. Overlay on original image
+    6. Return both the overlay image and per-region percentages
     
-    WHY these regions?
-    - Eyes: Deepfakes often have unnatural blinking or eye reflection artifacts
-    - Mouth/lips: Lip sync is hard to fake perfectly; color often mismatched
-    - Jaw/chin: Face blending boundary is usually around the jawline
-    - Forehead: Texture synthesis often fails here (hair-to-skin transition)
+    WHY this is different from the old heatmap:
+    The old heatmap drew blobs at hardcoded positions (eyes, jaw) regardless
+    of the image. This heatmap shows what the ACTUAL MODEL focused on.
+    If it focuses on the left cheek, that's where the heatmap will be bright.
     """
+    from utils.model import get_model_and_extractor
     
-    # Load image
+    model, feature_extractor = get_model_and_extractor()
+    
+    # ── Step 1: Load and prepare image ───────────────────────────────────
+    img_pil = Image.open(image_path).convert("RGB")
+    img_np = np.array(img_pil).astype(np.float32) / 255.0  # Normalize to 0-1
+    
+    # Feature extractor prepares tensor for the model
+    inputs = feature_extractor(images=img_pil, return_tensors="pt")
+    input_tensor = inputs["pixel_values"]  # Shape: [1, 3, 224, 224]
+    
+    # ── Step 2: Find the target layer for Grad-CAM ───────────────────────
+    # WHY the last layer? The last convolutional/attention layer has the
+    # richest spatial information. Earlier layers detect edges and textures,
+    # later layers detect high-level concepts like "fake blending artifact."
+    # For Vision Transformers, we target the last attention layer's norm.
+    try:
+        # For ViT models, this is the last layernorm before the classifier
+        target_layer = model.vit.layernorm
+    except AttributeError:
+        # Fallback for different model architectures
+        target_layer = list(model.modules())[-3]
+    
+    # ── Step 3: Define what we want gradients of ─────────────────────────
+    # We want gradients of the FAKE class score.
+    # WHY? We want to know which pixels made the model say "fake".
+    # If we used the "real" class, we'd get the opposite.
+    from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+    targets = [ClassifierOutputTarget(0)]
+    
+    # ── Step 4: Run Grad-CAM ─────────────────────────────────────────────
+    # GradCAM hooks into target_layer, runs forward pass, computes gradients
+    with GradCAM(model=model, target_layers=[target_layer]) as cam:
+        # grayscale_cam shape: [1, H, W] — values 0.0 to 1.0
+        grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
+        grayscale_cam = grayscale_cam[0]  # Remove batch dimension → [H, W]
+    
+    # Resize cam to match original image dimensions
+    h, w = img_np.shape[:2]
+    grayscale_cam_resized = cv2.resize(grayscale_cam, (w, h))
+    
+    # ── Step 5: Create colored overlay ───────────────────────────────────
+    # show_cam_on_image blends the heatmap with the original image
+    # colormap COLORMAP_RdYlGn: green (low) → yellow (medium) → red (high)
+    visualization = show_cam_on_image(
+        img_np,
+        grayscale_cam_resized,
+        use_rgb=True,
+        colormap=cv2.COLORMAP_RdYlGn,  # Green=real, Red=fake
+        image_weight=0.55  # 55% original, 45% heatmap overlay
+    )
+    
+    # ── Step 6: Calculate per-region percentages ─────────────────────────
+    region_scores = calculate_region_scores(image_path, grayscale_cam_resized)
+    
+    return Image.fromarray(visualization), region_scores
+
+
+def calculate_region_scores(image_path, cam_map):
+    """
+    Divides the face into named regions using MediaPipe landmarks,
+    then calculates the average Grad-CAM activation in each region.
+    
+    WHY MediaPipe? Without landmark detection, we'd have to guess where
+    the eyes are (like the old code did with hardcoded fractions).
+    MediaPipe finds the ACTUAL position of each facial feature in THIS
+    specific image. A face on the left side of the frame, or tilted at
+    an angle, will still get correctly segmented.
+    
+    Returns: dict like {"Left eye": 78.3, "Jaw": 91.2, "Lips": 45.0, ...}
+             where values are percentages 0–100
+    """
     img = cv2.imread(image_path)
-    if img is None:
-        return None
-    
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     h, w = img_rgb.shape[:2]
     
-    # Create blank heatmap canvas
-    heatmap = np.zeros((h, w), dtype=np.float32)
+    # Detect face landmarks
+    results = face_mesh.process(img_rgb)
     
-    # ── Define facial regions (as fractions of image size) ────────────────
-    # These are approximate positions for a centered face
-    # Format: (center_x_frac, center_y_frac, radius_x_frac, radius_y_frac, weight)
+    # If no face detected, return estimated scores from the cam map directly
+    if not results.multi_face_landmarks:
+        return _fallback_region_scores(cam_map)
     
-    blur_weight = breakdown.get("blur_anomaly", 0.1)
-    color_weight = breakdown.get("color_inconsistency", 0.1)
-    face_weight = breakdown.get("face_confidence_drop", 0.1)
-    freq_weight = breakdown.get("frequency_noise", 0.1)
+    landmarks = results.multi_face_landmarks[0].landmark
     
-    regions = [
-        # Left eye region
-        (0.35, 0.38, 0.12, 0.08, face_weight * 4 + freq_weight * 3),
-        # Right eye region
-        (0.65, 0.38, 0.12, 0.08, face_weight * 4 + freq_weight * 3),
-        # Mouth / lips
-        (0.50, 0.68, 0.18, 0.08, color_weight * 5 + blur_weight * 2),
-        # Jaw / chin (blending boundary)
-        (0.50, 0.82, 0.25, 0.10, blur_weight * 4 + face_weight * 2),
-        # Forehead
-        (0.50, 0.22, 0.22, 0.10, freq_weight * 3 + color_weight * 2),
-        # Left cheek
-        (0.28, 0.58, 0.10, 0.12, color_weight * 3),
-        # Right cheek
-        (0.72, 0.58, 0.10, 0.12, color_weight * 3),
-        # Nose bridge
-        (0.50, 0.50, 0.08, 0.15, face_weight * 2),
-    ]
+    region_scores = {}
     
-    # ── Paint Gaussian blobs at each region ─────────────────────────────
-    for (cx_frac, cy_frac, rx_frac, ry_frac, weight) in regions:
-        # Convert fractions to pixel coordinates
-        cx = int(cx_frac * w)
-        cy = int(cy_frac * h)
-        rx = int(rx_frac * w)
-        ry = int(ry_frac * h)
+    for region_name, landmark_indices in REGION_LANDMARKS.items():
+        # Convert landmark fractions to pixel coordinates
+        points = []
+        for idx in landmark_indices:
+            if idx < len(landmarks):
+                lm = landmarks[idx]
+                px = int(lm.x * w)
+                py = int(lm.y * h)
+                points.append([px, py])
         
-        # Create coordinate grid
-        Y, X = np.mgrid[0:h, 0:w]
+        if len(points) < 3:
+            region_scores[region_name] = 50.0
+            continue
         
-        # Gaussian blob formula
-        blob = np.exp(-(((X - cx) / rx) ** 2 + ((Y - cy) / ry) ** 2))
+        # Create a mask for this region using convex hull of landmarks
+        # WHY convex hull? The landmark points form the boundary of the region.
+        # We fill the enclosed area to create a binary mask.
+        pts = np.array(points, dtype=np.int32)
+        mask = np.zeros((h, w), dtype=np.uint8)
+        hull = cv2.convexHull(pts)
+        cv2.fillConvexPoly(mask, hull, 255)
         
-        # Scale blob by signal weight and fake score
-        heatmap += blob * weight * fake_score * 3
+        # Extract cam values only within this region's mask
+        region_cam_values = cam_map[mask > 0]
+        
+        if len(region_cam_values) == 0:
+            region_scores[region_name] = 50.0
+        else:
+            # Average activation in this region, converted to percentage
+            avg_activation = float(np.mean(region_cam_values))
+            region_scores[region_name] = round(avg_activation * 100, 1)
     
-    # Normalize heatmap to 0–255
-    if heatmap.max() > 0:
-        heatmap = heatmap / heatmap.max()
-    heatmap = (heatmap * 255).astype(np.uint8)
+    return region_scores
+
+
+def _fallback_region_scores(cam_map):
+    """
+    If MediaPipe can't find a face, estimate region scores from
+    approximate face zones (fractions of image size).
+    Less accurate but better than returning nothing.
+    """
+    h, w = cam_map.shape
     
-    # ── Apply colormap ───────────────────────────────────────────────────
-    # COLORMAP_JET: blue=safe, green=moderate, yellow=high, red=very suspicious
-    heatmap_colored = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-    heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+    def zone_avg(y1f, y2f, x1f, x2f):
+        y1, y2 = int(y1f*h), int(y2f*h)
+        x1, x2 = int(x1f*w), int(x2f*w)
+        return round(float(np.mean(cam_map[y1:y2, x1:x2])) * 100, 1)
     
-    # ── Blend heatmap with original image ───────────────────────────────
-    # Alpha = how transparent the heatmap is
-    # 0.0 = invisible, 1.0 = fully opaque
-    # We use 0.5 so you can still see the face underneath
-    alpha = 0.45 + (fake_score * 0.25)  # More suspicious = more vivid overlay
-    alpha = min(alpha, 0.7)  # Cap at 70% opacity
-    
-    blended = cv2.addWeighted(
-        img_rgb.astype(np.float32), 1 - alpha,
-        heatmap_rgb.astype(np.float32), alpha,
-        0
-    ).astype(np.uint8)
-    
-    # Convert to PIL for Streamlit display
-    return Image.fromarray(blended)
+    return {
+        "Left eye":  zone_avg(0.28, 0.42, 0.20, 0.48),
+        "Right eye": zone_avg(0.28, 0.42, 0.52, 0.80),
+        "Nose":      zone_avg(0.42, 0.62, 0.38, 0.62),
+        "Lips":      zone_avg(0.62, 0.75, 0.30, 0.70),
+        "Jaw":       zone_avg(0.75, 0.95, 0.20, 0.80),
+        "Forehead":  zone_avg(0.05, 0.28, 0.25, 0.75),
+    }
 
 
 def generate_signal_heatmap_data(frame_results):
     """
-    Prepares data for the Signal Breakdown visualization.
-    Aggregates signal contributions across all frames.
-    
-    Returns a dict ready for Plotly bar chart.
+    For the signal breakdown chart — now just returns region scores
+    averaged across all frames.
     """
     if not frame_results:
         return {}
     
-    signal_totals = {
-        "Face confidence drop": 0,
-        "Blur anomaly": 0,
-        "Color inconsistency": 0,
-        "Frequency noise": 0
-    }
+    all_regions = {}
+    count = 0
     
-    for result in frame_results:
-        bd = result.get("breakdown", {})
-        signal_totals["Face confidence drop"] += bd.get("face_confidence_drop", 0)
-        signal_totals["Blur anomaly"] += bd.get("blur_anomaly", 0)
-        signal_totals["Color inconsistency"] += bd.get("color_inconsistency", 0)
-        signal_totals["Frequency noise"] += bd.get("frequency_noise", 0)
+    for r in frame_results:
+        region_data = r.get("region_scores", {})
+        if region_data:
+            for region, score in region_data.items():
+                all_regions[region] = all_regions.get(region, 0) + score
+            count += 1
     
-    # Average across frames
-    n = len(frame_results)
-    signal_avgs = {k: round(v / n, 4) for k, v in signal_totals.items()}
+    if count == 0:
+        return {}
     
-    # Convert to percentages of total
-    total = sum(signal_avgs.values())
-    if total > 0:
-        signal_pcts = {k: round((v / total) * 100, 1) for k, v in signal_avgs.items()}
-    else:
-        signal_pcts = {k: 25.0 for k in signal_avgs}
-    
-    return signal_pcts
+    return {k: round(v / count, 1) for k, v in all_regions.items()}

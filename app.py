@@ -278,7 +278,12 @@ if uploaded_file is not None:
                 breakdown = frame_result.get("breakdown", {})
                 
                 # Generate heatmap for this frame
-                heatmap_img = generate_face_heatmap(frame_path, score, breakdown)
+                heatmap_result = generate_face_heatmap(frame_path, score, breakdown)
+
+                if heatmap_result:
+                   heatmap_img, region_scores = heatmap_result
+                else:
+                    heatmap_img, region_scores = None, {}
                 
                 if heatmap_img:
                     st.image(heatmap_img, use_column_width=True, caption=f"Frame {frame_num}")
@@ -299,6 +304,42 @@ if uploaded_file is not None:
                 )
         
         st.markdown("---")
+        # Show region-by-region breakdown for the worst frame
+if top_frames:
+    worst_frame = top_frames[0]
+
+    heatmap_result = generate_face_heatmap(
+        worst_frame["frame_path"],
+        worst_frame["fake_score"],
+        worst_frame.get("breakdown", {})
+    )
+
+    if heatmap_result:
+        _, region_scores = heatmap_result
+
+        st.markdown("### 🧩 Face Region Breakdown")
+        st.markdown(
+            "<p style='color:#94a3b8;font-size:0.9rem'>"
+            "How suspicious is each facial region? "
+            "Based on where the AI model focused when making its prediction.</p>",
+            unsafe_allow_html=True
+        )
+
+        region_cols = st.columns(len(region_scores))
+
+        for col, (region, pct) in zip(region_cols, region_scores.items()):
+            color = "#ef4444" if pct > 60 else "#f59e0b" if pct > 35 else "#22c55e"
+
+            with col:
+                st.markdown(
+                    f"<div style='text-align:center; padding:12px; "
+                    f"background:rgba(30,41,59,0.7); border-radius:10px; "
+                    f"border:1px solid {color}40;'>"
+                    f"<div style='font-size:1.4rem; font-weight:700; color:{color}'>{pct}%</div>"
+                    f"<div style='font-size:0.8rem; color:#94a3b8; margin-top:4px'>{region}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
         
         # ── ROW 5: AI Verdict Summary ─────────────────────────────────────
         st.markdown("### 🧠 AI Analysis Summary")
