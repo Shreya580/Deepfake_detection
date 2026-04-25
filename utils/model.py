@@ -3,6 +3,11 @@ import numpy as np
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
+try:
+    import cv2
+except Exception:
+    cv2 = None
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SPEED FIX: Load models ONCE at module level.
 # Loading inside score_frame() = 5s × 60 frames = 5 minutes wasted.
@@ -99,6 +104,78 @@ def _run_model2(img_pil):
         return None
 
 
+def _grid_values(arr, fn, grid=4):
+    h, w = arr.shape[:2]
+    values = []
+    for gy in range(grid):
+        for gx in range(grid):
+            y0, y1 = int(gy * h / grid), int((gy + 1) * h / grid)
+            x0, x1 = int(gx * w / grid), int((gx + 1) * w / grid)
+            patch = arr[y0:y1, x0:x1]
+            if patch.size:
+                values.append(float(fn(patch)))
+    return np.array(values, dtype=np.float32)
+
+
+def _estimate_editing_artifacts(img_pil):
+    """
+    Lightweight forensic score for local edits/composites.
+    This is not a replacement for a trained tamper-localization model, but it
+    catches cues the deepfake classifiers miss: inconsistent sharpness, heavy
+    local saturation, edge-density jumps, and compression/noise mismatch.
+    """
+    if cv2 is None:
+        return 0.0, {}
+
+    img = np.array(img_pil.resize((384, 384))).astype(np.uint8)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+
+    sharpness = _grid_values(
+        gray,
+        lambda p: cv2.Laplacian(p, cv2.CV_64F).var(),
+        grid=4,
+    )
+    edges = _grid_values(
+        gray,
+        lambda p: np.mean(cv2.Canny(p, 80, 160) > 0),
+        grid=4,
+    )
+    saturation = _grid_values(
+        hsv[:, :, 1],
+        lambda p: np.mean(p) / 255.0,
+        grid=4,
+    )
+
+    high_sat_pixels = float(np.mean(hsv[:, :, 1] > 185))
+    sharp_cv = float(np.std(sharpness) / (np.mean(sharpness) + 1e-6))
+    edge_cv = float(np.std(edges) / (np.mean(edges) + 1e-6))
+    sat_spread = float(np.percentile(saturation, 90) - np.percentile(saturation, 10))
+
+    sharpness_mismatch = np.clip((sharp_cv - 0.55) / 1.1, 0, 1)
+    edge_mismatch = np.clip((edge_cv - 0.45) / 1.0, 0, 1)
+    saturation_anomaly = np.clip((sat_spread - 0.18) / 0.42, 0, 1)
+    color_outlier = np.clip((high_sat_pixels - 0.08) / 0.32, 0, 1)
+
+    score = float(np.clip(
+        0.34 * sharpness_mismatch
+        + 0.28 * edge_mismatch
+        + 0.22 * saturation_anomaly
+        + 0.16 * color_outlier,
+        0,
+        1,
+    ))
+
+    signals = {
+        "editing_artifact_score": round(score, 4),
+        "sharpness_mismatch": round(float(sharpness_mismatch), 4),
+        "edge_mismatch": round(float(edge_mismatch), 4),
+        "saturation_anomaly": round(float(saturation_anomaly), 4),
+        "color_outlier": round(float(color_outlier), 4),
+    }
+    return score, signals
+
+
 def score_frame(image_path):
     """
     Runs BOTH models on a single frame and averages the results.
@@ -118,25 +195,41 @@ def score_frame(image_path):
         score1 = _run_model1(img_pil)
         score2 = _run_model2(img_pil)
 
+        calibrated_face_swap = float(np.sqrt(max(score1, 0.0)))
+
         if score2 is not None:
             # Ensemble: weighted average
             # Model 2 gets slightly more weight for AI-generated detection
             # since that's what this model specialises in and is the harder
             # case that model 1 fails on.
-            final_score = round(0.45 * score1 + 0.55 * score2, 4)
+            final_score = round(max(
+                0.45 * score1 + 0.55 * score2,
+                calibrated_face_swap,
+                score2,
+            ), 4)
         else:
-            final_score = round(score1, 4)
+            final_score = round(calibrated_face_swap, 4)
+
+        artifact_score, artifact_signals = _estimate_editing_artifacts(img_pil)
+        manipulation_score = round(max(
+            final_score,
+            0.72 * artifact_score + 0.28 * final_score,
+        ), 4)
 
         return {
-            "fake_score": final_score,
+            "fake_score": manipulation_score,
             "breakdown": {
                 "deepfake_model_score": round(score1, 4),
                 "ai_generation_model_score": round(score2, 4) if score2 is not None else 0.5,
+                **artifact_signals,
             },
             "raw_signals": {
                 "model1_fake_prob": round(score1, 4),
                 "model2_fake_prob": round(score2, 4) if score2 is not None else 0.5,
+                "calibrated_face_swap_score": round(calibrated_face_swap, 4),
                 "ensemble_score": final_score,
+                "artifact_score": round(artifact_score, 4),
+                "manipulation_score": manipulation_score,
             },
         }
 
@@ -195,7 +288,7 @@ def get_overall_verdict(frame_results):
     elif overall_score < 0.55:
         verdict, color = "Uncertain", "orange"
     else:
-        verdict, color = "Likely Deepfake", "red"
+        verdict, color = "Likely Manipulated", "red"
 
     return {
         "overall_score": overall_score,

@@ -17,7 +17,6 @@ BASE = dict(
     paper_bgcolor=C_BG,
     plot_bgcolor=C_BG,
     font=dict(family=FONT_MONO, color=C_TEXT, size=10),
-    margin=dict(l=12, r=16, t=44, b=24),
 )
 
 
@@ -74,12 +73,12 @@ def make_timeline_chart(frame_results):
                 font=dict(family=FONT_MONO, color=col, size=8), opacity=0.45)
 
     fig.update_layout(**BASE,
-        title=dict(text="FRAME-BY-FRAME FAKE PROBABILITY",
+        title=dict(text="FRAME-BY-FRAME MANIPULATION PROBABILITY",
                    font=dict(family=FONT_MONO, size=10, color=C_MUTED), x=0.0),
         xaxis=dict(title=dict(text="FRAME", font=dict(size=9, color=C_MUTED)),
                    showgrid=False, zeroline=False, color=C_MUTED,
                    tickfont=dict(size=9), linecolor="rgba(255,255,255,0.06)"),
-        yaxis=dict(title=dict(text="FAKE PROB", font=dict(size=9, color=C_MUTED)),
+        yaxis=dict(title=dict(text="MANIPULATION PROB", font=dict(size=9, color=C_MUTED)),
                    range=[0, 1.05], tickformat=".0%",
                    showgrid=True, gridcolor=C_GRID,
                    zeroline=False, color=C_MUTED, tickfont=dict(size=9),
@@ -95,7 +94,7 @@ def make_gauge_chart(verdict):
 
     fig = go.Figure(go.Indicator(
         mode="gauge+number", value=pct,
-        number=dict(suffix="%", font=dict(family=FONT_DISP, size=44, color=color)),
+        number=dict(suffix="%", font=dict(family=FONT_DISP, size=32, color=color)),
         title=dict(
             text=f"<span style='font-family:IBM Plex Mono,monospace;font-size:9px;"
                  f"letter-spacing:0.18em;color:{C_MUTED};'>{label}</span>",
@@ -223,7 +222,7 @@ def make_score_distribution(frame_results):
         title=dict(text="SCORE DISTRIBUTION",
                    font=dict(family=FONT_MONO, size=10, color=C_MUTED), x=0.0),
         xaxis=dict(
-            title=dict(text="FAKE SCORE", font=dict(size=9, color=C_MUTED)),
+            title=dict(text="MANIPULATION SCORE", font=dict(size=9, color=C_MUTED)),
             range=[0, 1], showgrid=False, zeroline=False,
             tickfont=dict(size=9, color=C_MUTED),
             linecolor="rgba(255,255,255,0.05)"),
@@ -266,5 +265,5 @@ def generate_verdict_text(verdict, frame_results):
             f"Analysis of {total} frame(s) yields a high manipulation probability of {score}%. "
             f"Significant anomalies concentrated around {rng}. "
             f"{fake_c} of {total} frames ({pf}%) exceeded the fake threshold. "
-            f"This media is likely deepfake or AI-generated."
+            f"This media is likely manipulated, deepfake, or AI-generated."
         )

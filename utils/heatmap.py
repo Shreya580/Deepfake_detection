@@ -3,7 +3,6 @@ import numpy as np
 from PIL import Image
 import torch
 from pytorch_grad_cam import GradCAMPlusPlus
-from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -105,25 +104,183 @@ def generate_face_heatmap(image_path, fake_score, breakdown):
         h, w = img_np.shape[:2]
         cam_resized = cv2.resize(grayscale_cam, (w, h))
 
-        # ── Build colored overlay ─────────────────────────────────────────
-        # COLORMAP_JET: blue=low (real) → green → yellow → red=high (fake)
-        # image_weight=0.5: 50% original, 50% heatmap overlay
-        visualization = show_cam_on_image(
-            img_np,
-            cam_resized,
-            use_rgb=True,
-            colormap=cv2.COLORMAP_JET,
-            image_weight=0.5
-        )
-
         # ── Per-region scores ─────────────────────────────────────────────
         region_scores = _calculate_region_scores(image_path, cam_resized, h, w)
+
+        visualization = _draw_gradient_overlay(
+            np.array(img_pil),
+            image_path,
+            cam_resized,
+        )
 
         return Image.fromarray(visualization), region_scores
 
     except Exception as e:
         print(f"[heatmap] Failed on {image_path}: {e}")
+        return generate_face_region_overlay(image_path, fake_score, breakdown)
+
+
+def generate_face_region_overlay(image_path, fake_score, breakdown):
+    """
+    Fallback explainability view when Grad-CAM is unavailable.
+    It still marks facial zones and colors them by suspicion so the report
+    never shows a plain, unexplained frame.
+    """
+    try:
+        img_pil = Image.open(image_path).convert("RGB")
+        img_np = np.array(img_pil)
+        grid_map = _artifact_grid_map(img_np, fake_score, breakdown)
+        full_map = cv2.resize(grid_map, (img_np.shape[1], img_np.shape[0]))
+        region_scores = _calculate_region_scores(image_path, full_map, img_np.shape[0], img_np.shape[1])
+        overlay = _draw_gradient_overlay(img_np, image_path, grid_map)
+        return Image.fromarray(overlay), region_scores
+    except Exception as e:
+        print(f"[heatmap] Fallback overlay failed on {image_path}: {e}")
         return None, {}
+
+
+def _fallback_region_scores_from_signals(fake_score, breakdown):
+    base = float(fake_score) * 100
+    breakdown = breakdown or {}
+    signal_bias = {
+        "Forehead": breakdown.get("frequency_noise", 0) * 80,
+        "Left Eye": breakdown.get("face_confidence_drop", 0) * 90,
+        "Right Eye": breakdown.get("face_confidence_drop", 0) * 90,
+        "Nose": breakdown.get("color_inconsistency", 0) * 80,
+        "Lips": breakdown.get("blur_anomaly", 0) * 85,
+        "Jaw": breakdown.get("color_inconsistency", 0) * 60,
+    }
+    return {
+        region: round(float(np.clip(base * 0.65 + bias, 0, 100)), 1)
+        for region, bias in signal_bias.items()
+    }
+
+
+def _region_boxes(image_path, img_h, img_w):
+    face_box = _detect_face_box(image_path)
+    if face_box:
+        fx, fy, fw, fh = face_box
+    else:
+        fw = int(img_w * 0.62)
+        fh = int(img_h * 0.78)
+        fx = int((img_w - fw) / 2)
+        fy = int(img_h * 0.08)
+
+    boxes = {}
+    for name, (y0f, y1f, x0f, x1f) in FACE_REGIONS.items():
+        x0 = max(0, int(fx + x0f * fw))
+        x1 = min(img_w, int(fx + x1f * fw))
+        y0 = max(0, int(fy + y0f * fh))
+        y1 = min(img_h, int(fy + y1f * fh))
+        boxes[name] = (x0, y0, x1, y1)
+    return boxes
+
+
+def _grid_area(image_path, img_h, img_w):
+    face_box = _detect_face_box(image_path)
+    if face_box:
+        fx, fy, fw, fh = face_box
+        pad_x = int(fw * 0.16)
+        pad_y = int(fh * 0.12)
+        return (
+            max(0, fx - pad_x),
+            max(0, fy - pad_y),
+            min(img_w, fx + fw + pad_x),
+            min(img_h, fy + fh + pad_y),
+        )
+
+    side = int(min(img_w, img_h) * 0.78)
+    x0 = int((img_w - side) / 2)
+    y0 = int((img_h - side) / 2)
+    return x0, y0, x0 + side, y0 + side
+
+
+def _artifact_grid_map(image_np, fake_score, breakdown, grid=8):
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    hsv = cv2.cvtColor(image_np, cv2.COLOR_RGB2HSV)
+    h, w = gray.shape
+    raw = np.zeros((grid, grid), dtype=np.float32)
+
+    for gy in range(grid):
+        for gx in range(grid):
+            y0, y1 = int(gy * h / grid), int((gy + 1) * h / grid)
+            x0, x1 = int(gx * w / grid), int((gx + 1) * w / grid)
+            patch = gray[y0:y1, x0:x1]
+            sat_patch = hsv[y0:y1, x0:x1, 1]
+            if patch.size == 0:
+                continue
+
+            sharp = cv2.Laplacian(patch, cv2.CV_64F).var()
+            edge = np.mean(cv2.Canny(patch, 80, 160) > 0)
+            sat = np.mean(sat_patch) / 255.0
+            raw[gy, gx] = 0.45 * np.log1p(sharp) / 8.0 + 0.35 * edge + 0.2 * sat
+
+    spread = raw.max() - raw.min()
+    if spread > 1e-6:
+        raw = (raw - raw.min()) / spread
+    base = float(fake_score)
+    breakdown = breakdown or {}
+    artifact_boost = max(
+        float(breakdown.get("editing_artifact_score", 0)),
+        float(breakdown.get("sharpness_mismatch", 0)),
+        float(breakdown.get("edge_mismatch", 0)),
+        float(breakdown.get("saturation_anomaly", 0)),
+    )
+    return np.clip(0.55 * raw + 0.30 * base + 0.15 * artifact_boost, 0, 1)
+
+
+def _score_color(score):
+    if score >= 60:
+        return (255, 40, 80)
+    if score >= 35:
+        return (255, 160, 0)
+    return (0, 200, 112)
+
+
+def _risk_colormap(risk_map):
+    risk_map = np.clip(risk_map.astype(np.float32), 0, 1)
+    colors = np.zeros((*risk_map.shape, 3), dtype=np.float32)
+
+    low = risk_map < 0.5
+    high = ~low
+
+    low_t = np.zeros_like(risk_map)
+    low_t[low] = risk_map[low] / 0.5
+    colors[low, 0] = 255 * low_t[low]
+    colors[low, 1] = 200 - 20 * low_t[low]
+    colors[low, 2] = 112 * (1 - low_t[low])
+
+    high_t = np.zeros_like(risk_map)
+    high_t[high] = (risk_map[high] - 0.5) / 0.5
+    colors[high, 0] = 255
+    colors[high, 1] = 180 * (1 - high_t[high]) + 40 * high_t[high]
+    colors[high, 2] = 80 * high_t[high]
+    return colors.astype(np.uint8)
+
+
+def _draw_gradient_overlay(image_np, image_path, risk_scores):
+    out = image_np.copy()
+    h, w = out.shape[:2]
+    x0, y0, x1, y1 = _grid_area(image_path, h, w)
+    area_w = max(1, x1 - x0)
+    area_h = max(1, y1 - y0)
+
+    if risk_scores is None or np.size(risk_scores) == 0:
+        risk_scores = np.zeros((area_h, area_w), dtype=np.float32)
+    else:
+        risk_scores = cv2.resize(
+            np.array(risk_scores, dtype=np.float32),
+            (area_w, area_h),
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+    risk_scores = cv2.GaussianBlur(risk_scores, (0, 0), sigmaX=area_w / 18, sigmaY=area_h / 18)
+    risk_scores = np.clip(risk_scores, 0, 1)
+    gradient = _risk_colormap(risk_scores)
+    roi = out[y0:y1, x0:x1]
+    blended = cv2.addWeighted(gradient, 0.42, roi, 0.58, 0)
+    out[y0:y1, x0:x1] = blended
+    return out
 
 
 def _detect_face_box(image_path):

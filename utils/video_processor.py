@@ -45,13 +45,10 @@ def extract_frames(video_path, output_folder="frames", max_frames=60, sample_eve
         
         # Only save every Nth frame (sampling)
         if frame_count % sample_every == 0:
-            # Resize frame to 224x224 — standard input size for most face models
-            # WHY resize? Smaller = faster processing, less RAM usage
-            resized = cv2.resize(frame, (224, 224))
-            
             # Save frame as JPEG
             frame_path = os.path.join(output_folder, f"frame_{saved_count:04d}.jpg")
-            cv2.imwrite(frame_path, resized)
+            preview = cv2.resize(frame, (512, 512))
+            cv2.imwrite(frame_path, preview)
             frame_paths.append(frame_path)
             saved_count += 1
         
@@ -79,12 +76,13 @@ def process_image(image_path, output_folder="frames"):
     for f in os.listdir(output_folder):
         os.remove(os.path.join(output_folder, f))
     
-    # Open and resize
+    # Open and resize. Keep enough detail for artifact checks; the model's
+    # feature extractor will handle its own 224px input internally.
     img = Image.open(image_path).convert("RGB")
-    img_resized = img.resize((224, 224))
+    img.thumbnail((768, 768))
     
     frame_path = os.path.join(output_folder, "frame_0000.jpg")
-    img_resized.save(frame_path)
+    img.save(frame_path)
     
     return {
         "frame_paths": [frame_path],
