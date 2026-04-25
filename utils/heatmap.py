@@ -2,269 +2,202 @@ import cv2
 import numpy as np
 from PIL import Image
 import torch
-
-# ── GradCAM imports ───────────────────────────────────────────────────────────
-# grad-cam library supports ViT models via GradCAMPlusPlus + reshape_transform
-# WHY GradCAMPlusPlus and not GradCAM?
-# Standard GradCAM was designed for CNNs with spatial feature maps (H×W grids).
-# ViTs produce sequence outputs (N tokens), not spatial grids.
-# GradCAMPlusPlus handles this better, and we add a reshape_transform to
-# convert the token sequence back into a 2D spatial grid for visualization.
 from pytorch_grad_cam import GradCAMPlusPlus
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 
-# ── OpenCV face detector ──────────────────────────────────────────────────────
-# WHY OpenCV instead of MediaPipe?
-# MediaPipe 0.10+ removed the mp.solutions API that older tutorials reference.
-# OpenCV's Haar Cascade face detector is built into opencv-python (no extra
-# install), works on every platform, and is fast enough for this use case.
+# ─────────────────────────────────────────────────────────────────────────────
+# NO MEDIAPIPE — mp.solutions was removed in mediapipe 0.10+.
+# We use OpenCV's built-in Haar cascade instead (zero extra dependencies).
+# ─────────────────────────────────────────────────────────────────────────────
+
 try:
-    _CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    _FACE_CASCADE = cv2.CascadeClassifier(_CASCADE_PATH)
+    _FACE_CASCADE = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
 except Exception:
     _FACE_CASCADE = None
 
-# ── Face region definitions (relative to detected face bounding box) ──────────
-# Since we're using a simple face detector (not 468-point landmarks),
-# we define regions as fractions of the face bounding box.
-# Format: (y_start_frac, y_end_frac, x_start_frac, x_end_frac)
+# Face region definitions as fractions of the detected face bounding box.
+# (y_start, y_end, x_start, x_end) — all 0.0 to 1.0 relative to face box.
 FACE_REGIONS = {
-    "Forehead":  (0.00, 0.25, 0.15, 0.85),
-    "Left Eye":  (0.25, 0.45, 0.10, 0.48),
-    "Right Eye": (0.25, 0.45, 0.52, 0.90),
-    "Nose":      (0.40, 0.65, 0.30, 0.70),
-    "Lips":      (0.63, 0.80, 0.25, 0.75),
+    "Forehead":  (0.00, 0.22, 0.15, 0.85),
+    "Left Eye":  (0.22, 0.42, 0.10, 0.46),
+    "Right Eye": (0.22, 0.42, 0.54, 0.90),
+    "Nose":      (0.38, 0.62, 0.33, 0.67),
+    "Lips":      (0.62, 0.78, 0.22, 0.78),
     "Jaw":       (0.78, 1.00, 0.10, 0.90),
 }
 
-
-def _reshape_transform_vit(tensor, height=14, width=14):
+# SPEED: ViT reshape transform — converts token sequence to 2D spatial grid
+# WHY needed? Standard GradCAM expects [B, C, H, W] feature maps from CNNs.
+# ViTs output [B, N_tokens, embedding_dim] — a sequence, not a grid.
+# This transform reshapes it so GradCAM can produce a spatial heatmap.
+def _vit_reshape_transform(tensor, height=14, width=14):
     """
-    Reshape ViT token output for GradCAM spatial visualization.
-
-    WHY this is needed:
-    ViT splits the image into 14×14 = 196 patches + 1 CLS token = 197 tokens.
-    GradCAM expects a 2D spatial tensor like (batch, channels, H, W).
-    This function:
-    1. Removes the CLS token (index 0)
-    2. Reshapes the 196 remaining tokens back to 14×14
-    3. Permutes to (batch, channels, H, W) format
-
-    Result: GradCAM can now treat ViT like a CNN and produce a spatial heatmap.
+    Reshapes ViT output tokens into a 2D spatial grid.
+    ViT-base splits a 224×224 image into 14×14 = 196 patches.
+    Token 0 is the [CLS] classification token — we skip it.
+    Remaining 196 tokens correspond to the 14×14 patch grid.
     """
-    # tensor shape: (batch, num_tokens, embed_dim) = (1, 197, 768)
-    result = tensor[:, 1:, :]  # Remove CLS token → (1, 196, 768)
-    result = result.reshape(
-        tensor.size(0),   # batch
-        height,
-        width,
-        -1                # embed_dim (auto-calculated = 768)
+    # tensor shape: [batch, num_tokens, embed_dim]
+    # Skip CLS token (index 0), reshape the rest to [B, H, W, C]
+    result = tensor[:, 1:, :].reshape(
+        tensor.size(0), height, width, tensor.size(2)
     )
-    result = result.transpose(2, 3).transpose(1, 2)  # → (1, 768, 14, 14)
+    # Permute to [B, C, H, W] as expected by GradCAM
+    result = result.permute(0, 3, 1, 2)
     return result
 
 
 def generate_face_heatmap(image_path, fake_score, breakdown):
     """
-    Generates a Grad-CAM++ heatmap showing exactly which pixels the ViT model
-    focused on when deciding "fake" vs "real". Overlays the heatmap on the
-    original image using a green→yellow→red color gradient.
+    Generates a real Grad-CAM++ heatmap showing which image regions
+    caused the model to predict "fake", then scores each facial zone.
 
-    Also calculates per-region suspicion percentages using the face bounding
-    box detected by OpenCV.
+    WHY GradCAMPlusPlus instead of plain GradCAM?
+    GradCAM++ averages gradients across the spatial dimension.
+    For ViTs this gives cleaner, more localised heatmaps — less noise.
 
-    Returns:
-        (PIL.Image, dict)  — (heatmap overlay image, {region: pct})
-        or None on failure
+    Returns: (PIL Image with heatmap overlay, dict of region percentages)
+    On failure: (None, {})
     """
+    from utils.model import get_model_and_extractor
+
     try:
-        from utils.model import get_model_and_extractor
-        vit_model, feature_extractor = get_model_and_extractor()
+        model, feature_extractor, fake_idx = get_model_and_extractor()
 
-        # ── Load image ────────────────────────────────────────────────────
+        # Load image in two formats needed by different steps
         img_pil = Image.open(image_path).convert("RGB")
-        img_np = np.array(img_pil).astype(np.float32) / 255.0  # Normalize 0–1
+        img_np = np.array(img_pil).astype(np.float32) / 255.0   # 0-1 float for blending
 
+        # Prepare input tensor
         inputs = feature_extractor(images=img_pil, return_tensors="pt")
-        input_tensor = inputs["pixel_values"]  # (1, 3, 224, 224)
+        input_tensor = inputs["pixel_values"]   # [1, 3, 224, 224]
 
-        # ── Find target layer ─────────────────────────────────────────────
-        # For ViT (dima806 model uses google/vit-base-patch16-224 backbone):
-        # We target the last transformer encoder block's layernorm.
-        # WHY this layer? It's the last layer with rich spatial semantics
-        # before the final classifier head — ideal for attribution.
+        # ── Target layer: last encoder block's layernorm ─────────────────
+        # WHY this layer? It's the last layer before the classifier head.
+        # It has the richest semantic spatial information — the model has
+        # already decided "fake" here, so its attention map shows exactly
+        # which regions contributed to that decision.
         try:
-            # Standard ViT structure: model.vit.encoder.layer[-1].layernorm_before
-            target_layer = vit_model.vit.encoder.layer[-1].layernorm_before
+            target_layer = model.vit.encoder.layer[-1].layernorm_before
         except AttributeError:
             try:
-                # Alternative path
-                target_layer = vit_model.vit.layernorm
+                target_layer = model.vit.layernorm
             except AttributeError:
-                # Generic fallback: take 3rd-to-last module with parameters
-                all_layers = [m for m in vit_model.modules()
-                              if len(list(m.parameters(recurse=False))) > 0]
-                target_layer = all_layers[-3]
+                # Generic fallback for other architectures
+                layers = [m for m in model.modules() if hasattr(m, "weight")]
+                target_layer = layers[-3]
 
-        fake_idx = breakdown.get("fake_label_idx", 0)
         targets = [ClassifierOutputTarget(fake_idx)]
 
-        # ── Run GradCAM++ ─────────────────────────────────────────────────
+        # ── Run GradCAM++ with ViT reshape transform ─────────────────────
         with GradCAMPlusPlus(
-            model=vit_model,
+            model=model,
             target_layers=[target_layer],
-            reshape_transform=_reshape_transform_vit   # ← essential for ViT
+            reshape_transform=_vit_reshape_transform   # KEY: makes ViT work
         ) as cam:
             grayscale_cam = cam(input_tensor=input_tensor, targets=targets)
-            grayscale_cam = grayscale_cam[0]  # Remove batch dim → (H, W)
+            grayscale_cam = grayscale_cam[0]   # Remove batch dim → [H, W]
 
-        # Resize CAM to match original image size
-        h_orig, w_orig = img_np.shape[:2]
-        cam_resized = cv2.resize(grayscale_cam, (w_orig, h_orig))
+        # Resize CAM map to original image size
+        h, w = img_np.shape[:2]
+        cam_resized = cv2.resize(grayscale_cam, (w, h))
 
-        # ── Create colored overlay ────────────────────────────────────────
-        # COLORMAP_RdYlGn: green (low activation) → yellow → red (high)
-        # image_weight=0.55 means 55% original, 45% heatmap — balanced view
+        # ── Build colored overlay ─────────────────────────────────────────
+        # COLORMAP_JET: blue=low (real) → green → yellow → red=high (fake)
+        # image_weight=0.5: 50% original, 50% heatmap overlay
         visualization = show_cam_on_image(
             img_np,
             cam_resized,
             use_rgb=True,
-            colormap=cv2.COLORMAP_RdYlGn,
-            image_weight=0.55
+            colormap=cv2.COLORMAP_JET,
+            image_weight=0.5
         )
 
         # ── Per-region scores ─────────────────────────────────────────────
-        region_scores = _calculate_region_scores(image_path, cam_resized, h_orig, w_orig)
+        region_scores = _calculate_region_scores(image_path, cam_resized, h, w)
 
         return Image.fromarray(visualization), region_scores
 
     except Exception as e:
-        print(f"[heatmap] GradCAM error on {image_path}: {e}")
-        # Return fallback: plain image + estimated scores
-        return _plain_fallback(image_path, fake_score)
+        print(f"[heatmap] Failed on {image_path}: {e}")
+        return None, {}
 
 
-def _calculate_region_scores(image_path, cam_map, h, w):
+def _detect_face_box(image_path):
     """
-    Detects the face bounding box using OpenCV Haar Cascade, then
-    calculates the average GradCAM activation in each named facial region.
-
-    WHY bounding box instead of 468 landmarks?
-    OpenCV's CascadeClassifier is built into opencv-python — zero extra
-    dependencies. For dividing into 6 approximate regions, a bounding box
-    with fractional offsets is accurate enough.
-
-    Returns dict: {"Forehead": 72.3, "Left Eye": 85.1, ...}
+    Detects the main face in the image using OpenCV Haar cascade.
+    Returns (x, y, w, h) or None if no face found.
     """
-    img_bgr = cv2.imread(image_path)
-    if img_bgr is None:
-        return _fallback_region_scores(cam_map)
-
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-    face_rect = None
-    if _FACE_CASCADE is not None and not _FACE_CASCADE.empty():
-        faces = _FACE_CASCADE.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=3,
-            minSize=(30, 30)
-        )
-        if len(faces) > 0:
-            # Use the largest detected face
-            face_rect = max(faces, key=lambda r: r[2] * r[3])
-
-    if face_rect is None:
-        # No face found — fall back to whole-image region estimates
-        return _fallback_region_scores(cam_map)
-
-    fx, fy, fw, fh = face_rect
-    region_scores = {}
-
-    for region_name, (y0f, y1f, x0f, x1f) in FACE_REGIONS.items():
-        # Convert fractions to pixel coordinates within face bounding box
-        ry0 = int(fy + y0f * fh)
-        ry1 = int(fy + y1f * fh)
-        rx0 = int(fx + x0f * fw)
-        rx1 = int(fx + x1f * fw)
-
-        # Clamp to image bounds
-        ry0, ry1 = max(0, ry0), min(h, ry1)
-        rx0, rx1 = max(0, rx0), min(w, rx1)
-
-        patch = cam_map[ry0:ry1, rx0:rx1]
-
-        if patch.size == 0:
-            region_scores[region_name] = 50.0
-        else:
-            avg = float(np.mean(patch))
-            region_scores[region_name] = round(avg * 100, 1)
-
-    return region_scores
-
-
-def _fallback_region_scores(cam_map):
-    """
-    When no face is detected, estimate region scores from the center of the
-    image using fixed fractions. Less precise but never crashes.
-    """
-    h, w = cam_map.shape
-
-    def zone(y0f, y1f, x0f, x1f):
-        patch = cam_map[int(y0f*h):int(y1f*h), int(x0f*w):int(x1f*w)]
-        return round(float(np.mean(patch)) * 100, 1) if patch.size > 0 else 50.0
-
-    return {
-        "Forehead":  zone(0.05, 0.25, 0.25, 0.75),
-        "Left Eye":  zone(0.25, 0.42, 0.15, 0.48),
-        "Right Eye": zone(0.25, 0.42, 0.52, 0.85),
-        "Nose":      zone(0.40, 0.62, 0.35, 0.65),
-        "Lips":      zone(0.62, 0.78, 0.28, 0.72),
-        "Jaw":       zone(0.78, 0.97, 0.15, 0.85),
-    }
-
-
-def _plain_fallback(image_path, fake_score):
-    """
-    If GradCAM completely fails, return the original image with no overlay
-    and dummy region scores based on the overall fake_score.
-    """
-    try:
-        img = Image.open(image_path).convert("RGB")
-        dummy_scores = {
-            "Forehead":  round(fake_score * 80, 1),
-            "Left Eye":  round(fake_score * 95, 1),
-            "Right Eye": round(fake_score * 90, 1),
-            "Nose":      round(fake_score * 60, 1),
-            "Lips":      round(fake_score * 85, 1),
-            "Jaw":       round(fake_score * 100, 1),
-        }
-        return img, dummy_scores
-    except Exception:
+    if _FACE_CASCADE is None or _FACE_CASCADE.empty():
         return None
+    img_gray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img_gray is None:
+        return None
+    faces = _FACE_CASCADE.detectMultiScale(
+        img_gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40)
+    )
+    if len(faces) == 0:
+        return None
+    # Return largest detected face
+    return tuple(sorted(faces, key=lambda f: f[2] * f[3], reverse=True)[0])
+
+
+def _calculate_region_scores(image_path, cam_map, img_h, img_w):
+    """
+    Scores each facial region by averaging the Grad-CAM activation
+    inside that region.
+
+    With face detected: uses actual face bounding box → accurate zones.
+    Without face: falls back to full-image fractions → still useful.
+    """
+    face_box = _detect_face_box(image_path)
+
+    if face_box:
+        fx, fy, fw, fh = face_box
+        scores = {}
+        for name, (y0f, y1f, x0f, x1f) in FACE_REGIONS.items():
+            py0 = max(0, int(fy + y0f * fh))
+            py1 = min(img_h, int(fy + y1f * fh))
+            px0 = max(0, int(fx + x0f * fw))
+            px1 = min(img_w, int(fx + x1f * fw))
+            region = cam_map[py0:py1, px0:px1]
+            scores[name] = round(float(np.mean(region)) * 100, 1) if region.size > 0 else 0.0
+        return scores
+    else:
+        return _fallback_scores(cam_map)
+
+
+def _fallback_scores(cam_map):
+    """Geometric fallback when no face bounding box is detected."""
+    h, w = cam_map.shape
+    def z(y0f, y1f, x0f, x1f):
+        r = cam_map[int(y0f*h):int(y1f*h), int(x0f*w):int(x1f*w)]
+        return round(float(np.mean(r)) * 100, 1) if r.size > 0 else 0.0
+    return {
+        "Forehead":  z(0.05, 0.25, 0.25, 0.75),
+        "Left Eye":  z(0.28, 0.42, 0.15, 0.45),
+        "Right Eye": z(0.28, 0.42, 0.55, 0.85),
+        "Nose":      z(0.42, 0.62, 0.35, 0.65),
+        "Lips":      z(0.62, 0.76, 0.28, 0.72),
+        "Jaw":       z(0.76, 0.95, 0.15, 0.85),
+    }
 
 
 def generate_signal_heatmap_data(frame_results):
     """
-    Averages region_scores across all frames that have them.
-    Used for the signal breakdown bar chart.
-    Returns dict like {"Jaw": 78.2, "Left Eye": 65.1, ...}
+    Aggregates region scores across all frames that have them.
+    Called by app.py to feed the signal breakdown chart.
     """
     if not frame_results:
         return {}
-
-    all_regions = {}
-    count = 0
-
+    totals, counts = {}, {}
     for r in frame_results:
-        region_data = r.get("region_scores", {})
-        if region_data:
-            for region, score in region_data.items():
-                all_regions[region] = all_regions.get(region, 0) + score
-            count += 1
-
-    if count == 0:
+        for region, score in r.get("region_scores", {}).items():
+            totals[region] = totals.get(region, 0.0) + score
+            counts[region] = counts.get(region, 0) + 1
+    if not totals:
         return {}
-
-    return {k: round(v / count, 1) for k, v in all_regions.items()}
+    return {k: round(totals[k] / counts[k], 1) for k in totals}
