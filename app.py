@@ -187,12 +187,7 @@ st.markdown("""
     <div class="hero-title">DEEP<span>SCAN</span></div>
     <div class="hero-sub">Pixel-level deepfake detection with explainable AI.
         Grad-CAM heatmaps. Ensemble neural models. Zero data retention.</div>
-    <div class="hero-pills">
-        <div class="hero-pill"><b>MODEL 1</b>&nbsp;Face-Swap ViT</div>
-        <div class="hero-pill"><b>MODEL 2</b>&nbsp;AI-Generation Detector</div>
-        <div class="hero-pill"><b>GRAD-CAM</b>&nbsp;Xception CNN</div>
-        <div class="hero-pill"><b>6 ZONES</b>&nbsp;Facial Region Scores</div>
-    </div>
+</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -205,7 +200,6 @@ col_l, col_r = st.columns([3, 2], gap="large")
 with col_l:
     st.markdown("""
     <div style='padding:44px 44px 0 64px;'>
-        <div class="eyebrow">// INPUT</div>
         <div class="sec-title">UPLOAD MEDIA</div>
     </div>
     <div style='padding:0 44px 44px 64px;'>
@@ -219,7 +213,6 @@ with col_l:
 with col_r:
     st.markdown("""
     <div style='padding:44px 64px 44px 0;'>
-        <div class="eyebrow">// PROCESS</div>
         <div class="sec-title">HOW IT WORKS</div>
         <div class="step"><div class="step-n">01</div><div class="step-t">Upload image or video</div></div>
         <div class="step"><div class="step-n">02</div><div class="step-t">Two AI models score each frame (ViT ensemble)</div></div>
@@ -280,10 +273,7 @@ if uploaded_file is not None:
                    + (f"  ·  {frame_data['duration_seconds']}s" if is_video else ""))
 
         # ── 2. Score frames ───────────────────────────────────────────────────
-        st.markdown("""<div style='font-family:IBM Plex Mono,monospace;font-size:0.6rem;
-            letter-spacing:0.2em;color:#3a5060;margin:20px 0 6px;'>
-            RUNNING ENSEMBLE INFERENCE</div>""", unsafe_allow_html=True)
-
+        
         prog   = st.progress(0)
         status = st.empty()
 
@@ -319,10 +309,7 @@ if uploaded_file is not None:
         top_frames = sorted(frame_results, key=lambda x: x["fake_score"], reverse=True)[:5]
 
         # ── 4. Generate heatmaps (cached dict) ───────────────────────────────
-        st.markdown("""<div style='font-family:IBM Plex Mono,monospace;font-size:0.6rem;
-            letter-spacing:0.2em;color:#3a5060;margin:14px 0 6px;'>
-            GENERATING GRAD-CAM HEATMAPS</div>""", unsafe_allow_html=True)
-
+        
         hprog = st.progress(0)
         hmap_cache = {}   # frame_path → (heatmap_img | None, region_scores)
 
@@ -371,7 +358,7 @@ if uploaded_file is not None:
         # ══════════════════════════════════════════════════════════════════════
         sc = "#ff2850" if pct>55 else "#ffa000" if pct>35 else "#00c870"
 
-        st.markdown('<div class="section"><div class="eyebrow">// SCAN METRICS</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section">', unsafe_allow_html=True)
         mc1,mc2,mc3,mc4,mc5 = st.columns(5, gap="small")
         for col, label, val, ac, vc2 in [
             (mc1, "FAKE SCORE",     f"{pct}%",                          sc,                         sc),
@@ -390,7 +377,7 @@ if uploaded_file is not None:
         # ══════════════════════════════════════════════════════════════════════
         # CHARTS
         # ══════════════════════════════════════════════════════════════════════
-        st.markdown('<div class="section"><div class="eyebrow">// ANALYSIS CHARTS</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section">', unsafe_allow_html=True)
         ch1, ch2, ch3 = st.columns([1,1,2], gap="medium")
         with ch1:
             st.plotly_chart(make_gauge_chart(verdict),
@@ -408,16 +395,7 @@ if uploaded_file is not None:
         # ══════════════════════════════════════════════════════════════════════
         st.markdown("""
         <div class="section">
-            <div class="eyebrow">// PIXEL-LEVEL ANALYSIS</div>
             <div class="sec-title">GRAD-CAM ACTIVATION MAPS</div>
-            <div style='font-family:IBM Plex Mono,monospace;font-size:0.58rem;
-                        letter-spacing:0.14em;color:#3a5060;margin-bottom:20px;'>
-                COLOUR KEY &nbsp;·&nbsp;
-                <span style='color:#1e6eff;'>■</span> REAL &nbsp;
-                <span style='color:#22c55e;'>■</span> LOW &nbsp;
-                <span style='color:#ffcc00;'>■</span> SUSPECT &nbsp;
-                <span style='color:#ff2850;'>■</span> FAKE
-            </div>
         """, unsafe_allow_html=True)
 
         # Show top 3 frames as original + heatmap pairs (cleaner than 5 thumbnails)
@@ -465,12 +443,7 @@ if uploaded_file is not None:
         if region_summary:
             st.markdown("""
             <div class="section">
-                <div class="eyebrow">// FACIAL FORENSICS</div>
                 <div class="sec-title">REGION SUSPICION SCORES</div>
-                <div style='font-family:IBM Plex Mono,monospace;font-size:0.58rem;
-                            letter-spacing:0.14em;color:#3a5060;margin-bottom:20px;'>
-                    GRAD-CAM ACTIVATION PER FACIAL ZONE · TOP SUSPICIOUS FRAMES
-                </div>
             """, unsafe_allow_html=True)
 
             rb_col, chart_col = st.columns([1,1], gap="large")
@@ -502,7 +475,7 @@ if uploaded_file is not None:
         # ══════════════════════════════════════════════════════════════════════
         # EXPORT
         # ══════════════════════════════════════════════════════════════════════
-        st.markdown('<div class="section"><div class="eyebrow">// EXPORT</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section">', unsafe_allow_html=True)
 
         export = {
             "verdict":      verdict,
