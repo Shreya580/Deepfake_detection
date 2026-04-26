@@ -7,4 +7,6 @@ pandas>=2.2.1
 torch
 torchvision
 transformers
-grad-cam
+timm
+matplotlib
+scipy
