@@ -178,7 +178,7 @@ def make_region_chart(region_scores):
         text=[f"{v:.1f}%" for v in values],
         textposition="outside",
         textfont=dict(family=MONO, color=C_MUTED, size=9),
-        hovertemplate="<b>%{y}</b>: %{x:.1f}% suspicion<extra></extra>"))
+        hovertemplate="<b>%{y}</b>: %{x:.1f}% <extra></extra>"))
 
     fig.update_layout(
         **BASE,

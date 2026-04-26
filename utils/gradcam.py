@@ -140,9 +140,8 @@ def generate_face_heatmap(image_path, fake_score, breakdown):
         cam = F.relu(cam)
         if cam.max() > 0:
             cam = (cam - cam.min()) / (cam.max() - cam.min())
-
-        threshold = 0.4
-        cam[cam < threshold] = 0.0
+      
+        cam[cam < 0.4] = 0.0
 
         # Resize to original image size
         cam_np      = cam.numpy()
@@ -161,7 +160,7 @@ def generate_face_heatmap(image_path, fake_score, breakdown):
         heatmap_rgb[cam_resized < threshold] = 0
 
         # 🔥 Scale intensity using fake score
-        heatmap_rgb = heatmap_rgb * fake_score
+        heatmap_rgb = heatmap_rgb * (0.4 + 0.6 * fake_score)
 
         # Convert to 0–255 safely
         heatmap_rgb = np.clip(heatmap_rgb * 255, 0, 255).astype(np.uint8)
@@ -170,7 +169,7 @@ def generate_face_heatmap(image_path, fake_score, breakdown):
 
         # Blend: 55% original + 45% heatmap
         orig_rgb = img_pil.convert("RGB")
-        alpha = 0.15 + 0.5 * fake_score
+        alpha = 0.35 + 0.4 * fake_score
         blended  = Image.blend(orig_rgb, heatmap_pil, alpha=alpha)
 
         # Per-zone scores

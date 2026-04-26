@@ -443,7 +443,7 @@ if uploaded_file is not None:
         if region_summary:
             st.markdown("""
             <div class="section">
-                <div class="sec-title">REGION SUSPICION SCORES</div>
+                <div class="sec-title">FACIAL REGION ANALYSIS</div>
             """, unsafe_allow_html=True)
 
             rb_col, chart_col = st.columns([1,1], gap="large")
