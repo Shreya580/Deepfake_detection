@@ -141,19 +141,37 @@ def generate_face_heatmap(image_path, fake_score, breakdown):
         if cam.max() > 0:
             cam = (cam - cam.min()) / (cam.max() - cam.min())
 
+        threshold = 0.4
+        cam[cam < threshold] = 0.0
+
         # Resize to original image size
         cam_np      = cam.numpy()
         cam_resized = cv2.resize(cam_np, (orig_w, orig_h))
 
         # Apply RdYlGn_r colormap: red=high attention, green=low
-        colormap     = cm.get_cmap("RdYlGn_r")
+        colormap = cm.get_cmap("RdYlGn_r")
+
         heatmap_rgba = colormap(cam_resized)
-        heatmap_rgb  = (heatmap_rgba[:, :, :3] * 255).astype(np.uint8)
-        heatmap_pil  = Image.fromarray(heatmap_rgb)
+
+        # Separate RGB
+        heatmap_rgb = heatmap_rgba[:, :, :3]
+
+        # 🔥 Remove weak activations
+        threshold = 0.4
+        heatmap_rgb[cam_resized < threshold] = 0
+
+        # 🔥 Scale intensity using fake score
+        heatmap_rgb = heatmap_rgb * fake_score
+
+        # Convert to 0–255 safely
+        heatmap_rgb = np.clip(heatmap_rgb * 255, 0, 255).astype(np.uint8)
+
+        heatmap_pil = Image.fromarray(heatmap_rgb)
 
         # Blend: 55% original + 45% heatmap
         orig_rgb = img_pil.convert("RGB")
-        blended  = Image.blend(orig_rgb, heatmap_pil, alpha=0.45)
+        alpha = 0.15 + 0.5 * fake_score
+        blended  = Image.blend(orig_rgb, heatmap_pil, alpha=alpha)
 
         # Per-zone scores
         region_scores = _zone_scores(image_path, cam_resized, orig_h, orig_w)
