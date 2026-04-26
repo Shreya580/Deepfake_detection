@@ -110,7 +110,10 @@ def score_frame(image_path):
 
         if score2 is not None:
             # Give model2 slightly more weight — AI-generated is harder to catch
-            final = round(0.45 * score1 + 0.55 * score2, 4)
+            if score2 > 0.7:
+                final = 0.4 * score1 + 0.6 * score2
+            else:
+                final = 0.5 * score1 + 0.5 * score2
         else:
             final = round(score1, 4)
 

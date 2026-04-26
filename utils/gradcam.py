@@ -173,7 +173,7 @@ def _detect_face(image_path):
     if gray is None:
         return None
     faces = _FACE_CASCADE.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))
+        gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
     if len(faces) == 0:
         return None
     return tuple(sorted(faces, key=lambda f: f[2]*f[3], reverse=True)[0])
