@@ -47,7 +47,7 @@ html, body, .stApp {
 
 /* Hide Streamlit chrome */
 #MainMenu, footer, header, .stDeployButton { visibility: hidden; }
-.block-container { padding: 0 !important; max-width: 100% !important; }
+.block-container { padding: 0 !important; max-width: 1280px !important; }
 [data-testid="stSidebar"] { display: none; }
 
 /* Scrollbar */
@@ -57,10 +57,11 @@ html, body, .stApp {
 
 /* ── HERO ── */
 .hero {
-    padding: 60px 64px 48px;
+    padding: 42px 48px 34px;
     border-bottom: 1px solid rgba(0,200,255,0.08);
     position: relative;
     overflow: hidden;
+    background: linear-gradient(135deg, rgba(0,200,255,0.06), rgba(255,40,80,0.025));
 }
 .hero::before {
     content: 'DEEPSCAN';
@@ -98,7 +99,7 @@ html, body, .stApp {
 
 .hero-title {
     font-family: 'Bebas Neue', cursive;
-    font-size: clamp(4rem, 9vw, 7.5rem);
+    font-size: clamp(3.2rem, 7vw, 5.8rem);
     letter-spacing: 0.04em;
     line-height: 0.9;
     color: #f0f8ff;
@@ -108,7 +109,7 @@ html, body, .stApp {
 
 .hero-sub {
     font-size: 0.9rem;
-    color: #4a6070;
+    color: #7f94a4;
     letter-spacing: 0.06em;
     max-width: 480px;
 }
@@ -131,7 +132,7 @@ html, body, .stApp {
 
 /* ── UPLOAD ZONE ── */
 .upload-wrap {
-    padding: 48px 64px;
+    padding: 36px 48px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -140,11 +141,12 @@ html, body, .stApp {
 }
 .section-eyebrow {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.62rem;
-    letter-spacing: 0.22em;
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
     color: #00c8ff;
-    opacity: 0.6;
+    opacity: 0.78;
     margin-bottom: 12px;
+    text-transform: uppercase;
 }
 .section-heading {
     font-family: 'Bebas Neue', cursive;
@@ -194,7 +196,7 @@ html, body, .stApp {
 
 /* ── FILE INFO BAR ── */
 .file-bar {
-    padding: 16px 64px;
+    padding: 14px 48px;
     background: rgba(0,200,255,0.03);
     border-bottom: 1px solid rgba(0,200,255,0.08);
     display: flex;
@@ -236,12 +238,12 @@ html, body, .stApp {
 /* ── PROGRESS ── */
 .stProgress > div > div {
     background: linear-gradient(90deg, #00c8ff, #0080ff) !important;
-    border-radius: 0 !important;
+    border-radius: 999px !important;
 }
 .stProgress > div {
     background: rgba(0,200,255,0.07) !important;
-    border-radius: 0 !important;
-    height: 2px !important;
+    border-radius: 999px !important;
+    height: 6px !important;
 }
 
 /* ── SUCCESS ── */
@@ -254,15 +256,74 @@ html, body, .stApp {
     font-size: 0.78rem !important;
 }
 
+/* ── SCAN STATUS ── */
+.scan-panel {
+    margin: 20px 48px 12px;
+    padding: 18px 20px;
+    border-radius: 10px;
+    border: 1px solid rgba(0,200,255,0.16);
+    background:
+        linear-gradient(135deg, rgba(0,200,255,0.08), rgba(255,255,255,0.015)),
+        rgba(5,12,24,0.78);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.28);
+}
+.scan-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.scan-title {
+    font-family: 'Bebas Neue', cursive;
+    color: #f0f8ff;
+    letter-spacing: 0.08em;
+    font-size: 1.5rem;
+    line-height: 1;
+}
+.scan-sub {
+    margin-top: 7px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: #6f8798;
+    letter-spacing: 0.08em;
+    font-size: 0.68rem;
+}
+.scan-pulse {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,200,255,0.3);
+    position: relative;
+    flex: 0 0 auto;
+}
+.scan-pulse::before,
+.scan-pulse::after {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    background: #00c8ff;
+    opacity: 0.8;
+    animation: scanPulse 1.35s ease-in-out infinite;
+}
+.scan-pulse::after {
+    inset: 14px;
+    background: #ffb400;
+    animation-delay: 0.28s;
+}
+@keyframes scanPulse {
+    0%, 100% { transform: scale(0.72); opacity: 0.45; }
+    50% { transform: scale(1.05); opacity: 1; }
+}
+
 /* ── VERDICT BANNER ── */
 .verdict-wrap {
-    padding: 0 64px;
+    padding: 0 48px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .verdict-card {
-    padding: 40px 48px;
-    border-radius: 4px;
-    margin: 40px 0;
+    padding: 28px 34px;
+    border-radius: 8px;
+    margin: 30px 0;
     position: relative;
     overflow: hidden;
 }
@@ -309,7 +370,7 @@ html, body, .stApp {
 
 /* ── METRICS ── */
 .metrics-row {
-    padding: 40px 64px;
+    padding: 30px 48px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .metric-grid {
@@ -318,7 +379,7 @@ html, body, .stApp {
     gap: 12px;
 }
 .metric-card {
-    padding: 20px 20px 18px;
+    padding: 16px 18px 15px;
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 3px;
     position: relative;
@@ -344,7 +405,7 @@ html, body, .stApp {
 }
 .metric-value {
     font-family: 'Bebas Neue', cursive;
-    font-size: 2.4rem;
+    font-size: 2rem;
     letter-spacing: 0.04em;
     line-height: 1;
     color: var(--val-color, #f0f8ff);
@@ -352,7 +413,7 @@ html, body, .stApp {
 
 /* ── CHARTS SECTION ── */
 .charts-section {
-    padding: 40px 64px;
+    padding: 30px 48px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .section-title-row {
@@ -376,7 +437,7 @@ html, body, .stApp {
 
 /* ── GALLERY ── */
 .gallery-section {
-    padding: 40px 64px;
+    padding: 30px 48px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .gallery-grid { display: grid; gap: 12px; }
@@ -391,12 +452,24 @@ html, body, .stApp {
     align-items: center;
     justify-content: center;
 }
+.heatmap-cell {
+    max-width: 220px;
+    margin: 0 auto;
+}
+.heatmap-cell img {
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 14px 35px rgba(0,0,0,0.28);
+}
 .frame-container img {
     width: 100% !important;
     height: 100% !important;
     object-fit: cover !important;
 }
 .frame-badge-new {
+    max-width: 220px;
+    margin-left: auto;
+    margin-right: auto;
     margin-top: 8px;
     text-align: center;
     font-family: 'IBM Plex Mono', monospace;
@@ -408,7 +481,7 @@ html, body, .stApp {
 
 /* ── REGION BREAKDOWN ── */
 .regions-section {
-    padding: 40px 64px;
+    padding: 30px 48px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .region-bar-wrap {
@@ -462,7 +535,7 @@ html, body, .stApp {
 
 /* ── FOOTER ── */
 .footer {
-    padding: 24px 64px;
+    padding: 24px 48px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -474,6 +547,24 @@ html, body, .stApp {
     color: #1a2a38;
 }
 .footer-dot { color: #00c8ff; opacity: 0.4; }
+
+@media (max-width: 760px) {
+    .hero { padding: 36px 24px 30px; }
+    .hero-title { font-size: 3.2rem; }
+    .hero-pills { gap: 8px; }
+    .hero-pill { width: 100%; }
+    .file-bar { padding: 12px 24px; flex-wrap: wrap; row-gap: 8px; }
+    .verdict-wrap,
+    .metrics-row,
+    .charts-section,
+    .gallery-section,
+    .regions-section,
+    .footer { padding-left: 24px; padding-right: 24px; }
+    .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .section-title-row { display: block; }
+    .heatmap-cell { max-width: 180px; }
+    .frame-badge-new { max-width: 180px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -485,13 +576,13 @@ st.markdown("""
 <div class="hero">
     <div class="hero-badge">AI FORENSICS LABORATORY · ACTIVE</div>
     <div class="hero-title">DEEP<span>SCAN</span></div>
-    <div class="hero-sub">Pixel-level deepfake detection with explainable AI.
-    Grad-CAM++ heatmaps. Ensemble neural models. Zero data retention.</div>
+    <div class="hero-sub">Face-swap detection with smooth explainability heatmaps,
+    frame-level analytics, and compact forensic reporting.</div>
     <div class="hero-pills">
-        <div class="hero-pill"><b>MODEL 1</b> &nbsp;Face-Swap Detection</div>
-        <div class="hero-pill"><b>MODEL 2</b> &nbsp;AI Generation Detection</div>
-        <div class="hero-pill"><b>GRAD-CAM++</b> &nbsp;Pixel Attribution</div>
-        <div class="hero-pill"><b>6 ZONES</b> &nbsp;Facial Region Scores</div>
+        <div class="hero-pill"><b>MODEL</b> &nbsp;ViT Face-Swap Detector</div>
+        <div class="hero-pill"><b>HEATMAP</b> &nbsp;Smooth Risk Gradient</div>
+        <div class="hero-pill"><b>VIDEO</b> &nbsp;Frame Timeline</div>
+        <div class="hero-pill"><b>REPORT</b> &nbsp;Compact JSON Export</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -505,7 +596,7 @@ col_left, col_right = st.columns([3, 2], gap="large")
 with col_left:
     st.markdown("""
     <div style='padding:48px 48px 0 64px;'>
-        <div class="section-eyebrow">// INPUT</div>
+        <div class="section-eyebrow">Media Input</div>
         <div class="section-heading">UPLOAD MEDIA</div>
     </div>
     """, unsafe_allow_html=True)
@@ -520,7 +611,7 @@ with col_left:
 with col_right:
     st.markdown("""
     <div style='padding:48px 64px 48px 0;'>
-        <div class="section-eyebrow">// HOW IT WORKS</div>
+        <div class="section-eyebrow">Workflow</div>
         <div class="section-heading">PROCESS</div>
         <div class="step-item">
             <div class="step-num">01</div>
@@ -528,15 +619,15 @@ with col_right:
         </div>
         <div class="step-item">
             <div class="step-num">02</div>
-            <div class="step-text">Two ensemble AI models score each frame independently</div>
+            <div class="step-text">A face-swap detector scores sampled frames directly</div>
         </div>
         <div class="step-item">
             <div class="step-num">03</div>
-            <div class="step-text">Grad-CAM++ maps exactly which pixels drove the fake prediction</div>
+            <div class="step-text">Smooth gradient maps reveal suspicious facial zones</div>
         </div>
         <div class="step-item">
             <div class="step-num">04</div>
-            <div class="step-text">6 facial zones each receive a suspicion percentage score</div>
+            <div class="step-text">Region scores summarize where the model sees risk</div>
         </div>
         <div class="step-item">
             <div class="step-num">✓</div>
@@ -579,27 +670,52 @@ if uploaded_file is not None and analyze_btn:
         tmp.write(uploaded_file.read())
         tmp_path = tmp.name
 
-    # ── Extract frames ──
-    with st.spinner("Extracting frames..."):
-        is_video = suffix.lower() == ".mp4"
-        if is_video:
-            frame_data = extract_frames(tmp_path, output_folder="frames",
-                                       max_frames=60, sample_every=15)
-        else:
-            frame_data = process_image(tmp_path, output_folder="frames")
+    scan_box = st.empty()
+    scan_box.markdown("""
+    <div class="scan-panel">
+        <div class="scan-row">
+            <div>
+                <div class="scan-title">Preparing Scan</div>
+                <div class="scan-sub">Reading media and sampling frames</div>
+            </div>
+            <div class="scan-pulse"></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    is_video = suffix.lower() == ".mp4"
+    if is_video:
+        frame_data = extract_frames(tmp_path, output_folder="frames",
+                                   max_frames=60, sample_every=15)
+    else:
+        frame_data = process_image(tmp_path, output_folder="frames")
 
     n_frames = frame_data["frames_extracted"]
     st.success(f"✓  {n_frames} frame(s) ready"
                + (f"  ·  {frame_data['duration_seconds']}s" if is_video else ""))
 
     # ── Analyze frames ──
-    st.markdown("### 🤖 Analyzing frames...")
+    scan_box.markdown(f"""
+    <div class="scan-panel">
+        <div class="scan-row">
+            <div>
+                <div class="scan-title">Analyzing Frames</div>
+                <div class="scan-sub">{n_frames} frame(s) queued for inference</div>
+            </div>
+            <div class="scan-pulse"></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     prog = st.progress(0)
     status = st.empty()
 
     def update_progress(cur, tot):
         prog.progress(cur / tot)
-        status.text(f"Processing frame {cur}/{tot}")
+        status.markdown(
+            f"<div style='margin:0 48px 14px;font-family:IBM Plex Mono,monospace;"
+            f"font-size:0.72rem;letter-spacing:0.08em;color:#6f8798;'>"
+            f"Frame {cur} of {tot} · running face-swap detector</div>",
+            unsafe_allow_html=True)
 
     try:
         frame_results = analyze_all_frames(
@@ -608,6 +724,17 @@ if uploaded_file is not None and analyze_btn:
         )
         prog.progress(1.0)
         status.empty()
+        scan_box.markdown("""
+        <div class="scan-panel">
+            <div class="scan-row">
+                <div>
+                    <div class="scan-title">Building Report</div>
+                    <div class="scan-sub">Generating verdict, charts, and heatmaps</div>
+                </div>
+                <div class="scan-pulse"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Analysis failed: {e}")
@@ -638,11 +765,6 @@ if uploaded_file is not None and analyze_btn:
                         key=lambda x: x["fake_score"], reverse=True)[:5]
 
     # ── Heatmaps for top 5 (cached) ───────────────────────────────────
-    st.markdown("""
-    <div style='font-family:IBM Plex Mono,monospace; font-size:0.62rem;
-                letter-spacing:0.2em; color:#3a5060; margin:16px 0 6px;'>
-        GENERATING GRADIENT HEATMAPS
-    </div>""", unsafe_allow_html=True)
     h_prog = st.progress(0)
     heatmap_cache = {}
     for i, fr in enumerate(top_frames):
@@ -652,6 +774,7 @@ if uploaded_file is not None and analyze_btn:
         fr["region_scores"] = regions
         h_prog.progress((i + 1) / len(top_frames))
     h_prog.empty()
+    scan_box.empty()
 
     signal_pcts = generate_signal_heatmap_data(top_frames)
 
@@ -690,7 +813,7 @@ if uploaded_file is not None and analyze_btn:
     score_col = "#ff2850" if pct>55 else "#ffa000" if pct>35 else "#00c870"
     st.markdown(f"""
     <div class="metrics-row">
-        <div class="section-eyebrow">// SCAN METRICS</div>
+        <div class="section-eyebrow">Scan Metrics</div>
         <div class="metric-grid">
             <div class="metric-card" style="--accent:{score_col}80;">
                     <div class="metric-label">MANIPULATION</div>
@@ -721,7 +844,7 @@ if uploaded_file is not None and analyze_btn:
     # ════════════════════════════════════════════════════════════════
     st.markdown("""
     <div class="charts-section">
-        <div class="section-eyebrow">// ANALYSIS CHARTS</div>
+        <div class="section-eyebrow">Analysis Charts</div>
     """, unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([1, 1, 2], gap="medium")
@@ -742,7 +865,7 @@ if uploaded_file is not None and analyze_btn:
     # ════════════════════════════════════════════════════════════════
     st.markdown("""
     <div class="gallery-section">
-        <div class="section-eyebrow">// PIXEL-LEVEL ANALYSIS</div>
+        <div class="section-eyebrow">Pixel-Level Analysis</div>
         <div class="section-title-row">
             <div class="section-title">GRADIENT DEFECT MAPS</div>
             <div class="section-desc">SMOOTH RED-ORANGE-GREEN RISK OVERLAY</div>
@@ -764,23 +887,16 @@ if uploaded_file is not None and analyze_btn:
             sc  = fr["fake_score"]
             bc  = "#ff2850" if sc > 0.6 else "#ffa000" if sc > 0.4 else "#00c870"
 
-            # Wrap image in a fixed-size CSS square container
-            st.markdown(f"""
-            <div style='width:100%;aspect-ratio:1/1;overflow:hidden;
-                        border-radius:3px;border:1px solid rgba(255,255,255,0.08);
-                        background:#000;display:flex;align-items:center;
-                        justify-content:center;'>
-            """, unsafe_allow_html=True)
-
             if hmap_img:
-                # FIX: resize image to square before showing so it fits cleanly
-                hmap_sq = hmap_img.resize((300, 300), Image.LANCZOS)
-                st.image(hmap_sq, use_column_width=True)
+                hmap_img.thumbnail((220, 220), Image.LANCZOS)
+                st.markdown("<div class='heatmap-cell'>", unsafe_allow_html=True)
+                st.image(hmap_img, width=220)
+                st.markdown("</div>", unsafe_allow_html=True)
             else:
-                orig = get_frame_thumbnail(fr["frame_path"], size=(300,300))
-                st.image(orig, use_column_width=True)
-
-            st.markdown("</div>", unsafe_allow_html=True)
+                orig = get_frame_thumbnail(fr["frame_path"], size=(220, 220))
+                st.markdown("<div class='heatmap-cell'>", unsafe_allow_html=True)
+                st.image(orig, width=220)
+                st.markdown("</div>", unsafe_allow_html=True)
             st.markdown(
                 f"<div class='frame-badge-new' style='background:{bc}12;"
                 f"border:1px solid {bc}40;color:{bc};'>"
@@ -799,7 +915,7 @@ if uploaded_file is not None and analyze_btn:
     if region_scores:
         st.markdown("""
         <div class="regions-section">
-            <div class="section-eyebrow">// FACIAL FORENSICS</div>
+            <div class="section-eyebrow">Facial Forensics</div>
             <div class="section-title-row">
                 <div class="section-title">REGION SUSPICION SCORES</div>
                 <div class="section-desc">GRADIENT ACTIVATION PER ZONE · WORST FRAME</div>
@@ -845,7 +961,7 @@ if uploaded_file is not None and analyze_btn:
     # ════════════════════════════════════════════════════════════════
     st.markdown("""
     <div style='padding:32px 64px 40px;border-bottom:1px solid rgba(255,255,255,0.04);'>
-        <div class="section-eyebrow">// EXPORT</div>
+        <div class="section-eyebrow">Export</div>
     """, unsafe_allow_html=True)
 
     export_data = {

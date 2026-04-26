@@ -1,7 +1,20 @@
 import cv2          # OpenCV for video reading
 import os           # For folder/file operations
-import numpy as np  # For image array math
 from PIL import Image  # For saving frames as images
+
+
+def _resize_preserving_aspect_pil(img, max_size=768):
+    img = img.copy()
+    img.thumbnail((max_size, max_size), Image.LANCZOS)
+    return img
+
+
+def _resize_preserving_aspect_cv(frame, max_size=768):
+    h, w = frame.shape[:2]
+    scale = min(max_size / max(h, w), 1.0)
+    if scale >= 1.0:
+        return frame
+    return cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
 def extract_frames(video_path, output_folder="frames", max_frames=60, sample_every=15):
     """
@@ -47,7 +60,7 @@ def extract_frames(video_path, output_folder="frames", max_frames=60, sample_eve
         if frame_count % sample_every == 0:
             # Save frame as JPEG
             frame_path = os.path.join(output_folder, f"frame_{saved_count:04d}.jpg")
-            preview = cv2.resize(frame, (512, 512))
+            preview = _resize_preserving_aspect_cv(frame, max_size=768)
             cv2.imwrite(frame_path, preview)
             frame_paths.append(frame_path)
             saved_count += 1
@@ -79,7 +92,7 @@ def process_image(image_path, output_folder="frames"):
     # Open and resize. Keep enough detail for artifact checks; the model's
     # feature extractor will handle its own 224px input internally.
     img = Image.open(image_path).convert("RGB")
-    img.thumbnail((768, 768))
+    img = _resize_preserving_aspect_pil(img, max_size=768)
     
     frame_path = os.path.join(output_folder, "frame_0000.jpg")
     img.save(frame_path)

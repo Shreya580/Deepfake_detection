@@ -195,20 +195,12 @@ def score_frame(image_path):
         score1 = _run_model1(img_pil)
         score2 = _run_model2(img_pil)
 
-        calibrated_face_swap = float(np.sqrt(max(score1, 0.0)))
-
-        if score2 is not None:
-            # Ensemble: weighted average
-            # Model 2 gets slightly more weight for AI-generated detection
-            # since that's what this model specialises in and is the harder
-            # case that model 1 fails on.
-            final_score = round(max(
-                0.45 * score1 + 0.55 * score2,
-                calibrated_face_swap,
-                score2,
-            ), 4)
-        else:
-            final_score = round(calibrated_face_swap, 4)
+        # Keep the primary fake probability close to Isha's more reliable
+        # implementation: the dima806 detector directly predicts face-swap
+        # fake probability. The AI-image model is only allowed to add signal
+        # when it is strongly confident, so it cannot wash out face-swap scores.
+        ai_signal = score2 if score2 is not None and score2 >= 0.65 else 0.0
+        final_score = round(max(score1, ai_signal), 4)
 
         artifact_score, artifact_signals = _estimate_editing_artifacts(img_pil)
         manipulation_score = round(max(
@@ -226,7 +218,6 @@ def score_frame(image_path):
             "raw_signals": {
                 "model1_fake_prob": round(score1, 4),
                 "model2_fake_prob": round(score2, 4) if score2 is not None else 0.5,
-                "calibrated_face_swap_score": round(calibrated_face_swap, 4),
                 "ensemble_score": final_score,
                 "artifact_score": round(artifact_score, 4),
                 "manipulation_score": manipulation_score,
